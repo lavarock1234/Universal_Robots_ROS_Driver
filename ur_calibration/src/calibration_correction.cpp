@@ -19,7 +19,7 @@
 //----------------------------------------------------------------------
 /*!\file
  *
- * \author  Felix Mauch mauch@fzi.de
+ * \author  Felix Exner exner@fzi.de
  * \date    2019-01-10
  *
  */
@@ -174,6 +174,10 @@ int main(int argc, char* argv[])
     ROS_INFO("Calibration correction done");
   }
   catch (const UrException& e)
+  {
+    ROS_ERROR_STREAM(e.what());
+  }
+  catch (const std::exception& e)
   {
     ROS_ERROR_STREAM(e.what());
   }

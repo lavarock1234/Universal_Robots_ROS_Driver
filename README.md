@@ -1,5 +1,4 @@
-[![Build Status](https://travis-ci.org/UniversalRobots/Universal_Robots_ROS_Driver.svg?branch=master)](https://travis-ci.org/UniversalRobots/Universal_Robots_ROS_Driver)
-
+# Universal_Robots_ROS_Driver FORKED for BLUEHILL
 
 # Universal_Robots_ROS_Driver
 Universal Robots have become a dominant supplier of lightweight, robotic manipulators for industry, as well as for scientific research and education. The Robot Operating System (ROS) has developed from a community-centered movement to a mature framework and quasi standard, providing a rich set of powerful tools for robot engineers and researchers, working in many different domains.
@@ -208,7 +207,7 @@ the output `Robot ready to receive control commands.`
 **Note:** When interacting with the teach pendant, or sending other primary programs to the robot, the
 program will be stopped. On the ROS terminal you will see an output `Connection to robot dropped,
 waiting for new connection`. In those cases, restart program execution (e.g. by pressing the play
-button on the TP).
+button on the TP, or calling `rosservice call /ur_hardware_interface/dashboard/play` as explained [here](https://github.com/UniversalRobots/Universal_Robots_ROS_Driver/issues/33) and [here](ur_robot_driver/doc/ROS_INTERFACE.md#ur_robot_driver_node)).
 
 In general, make sure you've completed the following tasks:
 
@@ -236,3 +235,9 @@ to the fieldbus scanner can be established (note: This is only to get the
 `External Control` running. You probably want to make sure that a connection to
 the fieldbus scanner can indeed be made). If you don't use EtherNet/IP
 fieldbusses at all, you can disable it in the same installation screen. 
+
+### I cannot get a realtime kernel running together with an NVIDIA graphics card
+This is a known issue and unfortunately we don't have a solution for this. The Nvidia kernel module
+seems to not compile with every kernel. We recommend to use a multi-machine ROS setup in this
+situation where a realtime-system is running the robot driver and a separate machine is performing
+the computations requiring the graphics card.

@@ -19,7 +19,7 @@
 //----------------------------------------------------------------------
 /*!\file
  *
- * \author  Felix Mauch mauch@fzi.de
+ * \author  Felix Exner exner@fzi.de
  * \date    2019-04-18
  *
  */
@@ -65,6 +65,7 @@ public:
     // in the next control cycle, leaving the current cycle without a valid trajectory.
 
     // Update current state and state error
+    int current_idx = -1;
     for (unsigned int i = 0; i < this->joints_.size(); ++i)
     {
       this->current_state_.position[i] = this->joints_[i].getPosition();
@@ -73,6 +74,9 @@ public:
 
       typename Base::TrajectoryPerJoint::const_iterator segment_it =
           sample(curr_traj[i], traj_time.toSec(), this->desired_joint_state_);
+      if(current_idx < 0) {
+          current_idx = std::distance(curr_traj[i].cbegin(), segment_it);
+      }
       if (curr_traj[i].end() == segment_it)
       {
         // Non-realtime safe, but should never happen under normal operation
@@ -181,6 +185,7 @@ public:
     if (current_active_goal)
     {
       current_active_goal->preallocated_feedback_->header.stamp = this->time_data_.readFromRT()->time;
+      current_active_goal->preallocated_feedback_->header.frame_id = std::to_string(current_idx);
       current_active_goal->preallocated_feedback_->desired.positions = this->desired_state_.position;
       current_active_goal->preallocated_feedback_->desired.velocities = this->desired_state_.velocity;
       current_active_goal->preallocated_feedback_->desired.accelerations = this->desired_state_.acceleration;

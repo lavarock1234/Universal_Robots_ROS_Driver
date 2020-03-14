@@ -19,7 +19,7 @@
 //----------------------------------------------------------------------
 /*!\file
  *
- * \author  Felix Mauch mauch@fzi.de
+ * \author  Felix Exner exner@fzi.de
  * \date    2019-04-11
  *
  */
@@ -190,6 +190,7 @@ protected:
   bool setSpeedSlider(ur_msgs::SetSpeedSliderFractionRequest& req, ur_msgs::SetSpeedSliderFractionResponse& res);
   bool setIO(ur_msgs::SetIORequest& req, ur_msgs::SetIOResponse& res);
   bool resendRobotProgram(std_srvs::TriggerRequest& req, std_srvs::TriggerResponse& res);
+  bool zeroFTSensor(std_srvs::TriggerRequest& req, std_srvs::TriggerResponse& res);
   void commandCallback(const std_msgs::StringConstPtr& msg);
 
   std::unique_ptr<UrDriver> ur_driver_;
@@ -197,16 +198,18 @@ protected:
 
   ros::ServiceServer deactivate_srv_;
   ros::ServiceServer set_payload_srv_;
+  ros::ServiceServer tare_sensor_srv_;
 
   hardware_interface::JointStateInterface js_interface_;
   ur_controllers::ScaledPositionJointInterface spj_interface_;
   hardware_interface::PositionJointInterface pj_interface_;
   ur_controllers::SpeedScalingInterface speedsc_interface_;
-  // hardware_interface::VelocityJointInterface vj_interface_;
+  hardware_interface::VelocityJointInterface vj_interface_;
+  ur_controllers::ScaledVelocityJointInterface svj_interface_;
   hardware_interface::ForceTorqueSensorInterface fts_interface_;
 
   vector6d_t joint_position_command_;
-  // std::vector<double> joint_velocity_command_;
+  vector6d_t joint_velocity_command_;
   vector6d_t joint_positions_;
   vector6d_t joint_velocities_;
   vector6d_t joint_efforts_;
@@ -246,6 +249,7 @@ protected:
 
   uint32_t runtime_state_;
   bool position_controller_running_;
+  bool velocity_controller_running_;
 
   PausingState pausing_state_;
   double pausing_ramp_up_increment_;
@@ -256,6 +260,9 @@ protected:
 
   bool controller_reset_necessary_;
   bool controllers_initialized_;
+
+  bool packet_read_;
+  bool non_blocking_read_;
 
   std::string robot_ip_;
   std::string tf_prefix_;

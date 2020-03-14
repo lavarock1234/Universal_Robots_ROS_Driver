@@ -19,7 +19,7 @@
 //----------------------------------------------------------------------
 /*!\file
  *
- * \author  Felix Mauch mauch@fzi.de
+ * \author  Felix Exner exner@fzi.de
  * \date    2019-06-11
  *
  */
@@ -43,6 +43,12 @@ struct VersionInformation
     minor = 0;
     bugfix = 0;
     build = 0;
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, const VersionInformation& version_info)
+  {
+    os << version_info.major << "." << version_info.minor << "." << version_info.bugfix << "-" << version_info.build;
+    return os;
   }
   uint32_t major;   ///< Major version number
   uint32_t minor;   ///< Minor version number
