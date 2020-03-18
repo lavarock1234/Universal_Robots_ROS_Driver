@@ -30,12 +30,52 @@
 #include "ur_controllers/hardware_interface_adapter.h"
 #include <joint_trajectory_controller/joint_trajectory_controller.h>
 
-namespace ur_controllers
-{
+namespace ur_controllers {
+
+#define DEG_TO_RAD (M_PI / 180.0)
+#define RAD_TO_DEG (180.0 / M_PI)
+
+double interpolate(double t, double T, double p0_pos, double p1_pos, double p0_vel, double p1_vel) {
+  using std::pow;
+  double a = p0_pos;
+  double b = p0_vel;
+  double c = (-3 * a + 3 * p1_pos - 2 * T * b - T * p1_vel) / pow(T, 2);
+  double d = (2 * a - 2 * p1_pos + T * b + T * p1_vel) / pow(T, 3);
+  return a + b * t + c * pow(t, 2) + d * pow(t, 3);
+}
+template<class T>
+inline std::string ToString(const T& obj) {
+    std::stringstream ss;
+    ss << obj;
+    return ss.str();
+}
+template<class T>
+inline std::string ToString(const T& obj, unsigned precision) {
+    std::stringstream ss;
+    ss << std::fixed << std::setprecision(precision) << obj;
+    return ss.str();
+}
+template<class T>
+inline std::string ToString(const std::vector<T>& vec, unsigned precision = 6, double multiplier = 1.0, char delimiter = ',', std::string braces = "[]") {
+    if(braces.size() != 2) {
+        braces = "[]";
+    }
+
+    if(vec.empty()) {
+        return std::string("[]");
+    }
+    std::stringstream ss;
+    ss << braces[0];
+    for(unsigned i = 0; i < vec.size() - 1; i++) {
+        ss << ToString(multiplier * vec[i], precision) << delimiter;
+    }
+    ss << ToString(multiplier * vec[vec.size()-1], precision) << braces[1];
+    return ss.str();
+}
+
 template <class SegmentImpl, class HardwareInterface>
 class ScaledJointTrajectoryController
-  : public joint_trajectory_controller::JointTrajectoryController<SegmentImpl, HardwareInterface>
-{
+  : public joint_trajectory_controller::JointTrajectoryController<SegmentImpl, HardwareInterface> {
 public:
   ScaledJointTrajectoryController() = default;
   virtual ~ScaledJointTrajectoryController() = default;
@@ -66,111 +106,49 @@ public:
 
     // Update current state and state error
     int current_idx = -1;
-    for (unsigned int i = 0; i < this->joints_.size(); ++i)
-    {
+    for (unsigned int i = 0; i < this->joints_.size(); ++i) {
       this->current_state_.position[i] = this->joints_[i].getPosition();
       this->current_state_.velocity[i] = this->joints_[i].getVelocity();
       // There's no acceleration data available in a joint handle
 
-      typename Base::TrajectoryPerJoint::const_iterator segment_it =
-          sample(curr_traj[i], traj_time.toSec(), this->desired_joint_state_);
+      // Sample populates both the iterator to current tracked point and desired_joint_state for this joint
+      auto segment_it = sample(curr_traj[i], traj_time.toSec(), this->desired_joint_state_);
       if(current_idx < 0) {
           current_idx = std::distance(curr_traj[i].cbegin(), segment_it);
       }
-      if (curr_traj[i].end() == segment_it)
-      {
+      if (curr_traj[i].end() == segment_it) {
         // Non-realtime safe, but should never happen under normal operation
-        ROS_ERROR_NAMED(this->name_, "Unexpected error: No trajectory defined at current time. Please contact the "
-                                     "package "
-                                     "maintainer.");
+        ROS_ERROR_NAMED(this->name_, "Unexpected error: No trajectory defined at current time. Please contact the package maintainer.");
         return;
       }
       this->desired_state_.position[i] = this->desired_joint_state_.position[0];
       this->desired_state_.velocity[i] = this->desired_joint_state_.velocity[0];
       this->desired_state_.acceleration[i] = this->desired_joint_state_.acceleration[0];
-      ;
 
-      this->state_joint_error_.position[0] =
-          angles::shortest_angular_distance(this->current_state_.position[i], this->desired_joint_state_.position[0]);
+      this->state_joint_error_.position[0] = angles::shortest_angular_distance(this->current_state_.position[i], this->desired_joint_state_.position[0]);
       this->state_joint_error_.velocity[0] = this->desired_joint_state_.velocity[0] - this->current_state_.velocity[i];
       this->state_joint_error_.acceleration[0] = 0.0;
 
-      this->state_error_.position[i] =
-          angles::shortest_angular_distance(this->current_state_.position[i], this->desired_joint_state_.position[0]);
+      this->state_error_.position[i] = angles::shortest_angular_distance(this->current_state_.position[i], this->desired_joint_state_.position[0]);
       this->state_error_.velocity[i] = this->desired_joint_state_.velocity[0] - this->current_state_.velocity[i];
       this->state_error_.acceleration[i] = 0.0;
 
       // Check tolerances
-      const typename Base::RealtimeGoalHandlePtr rt_segment_goal = segment_it->getGoalHandle();
-      if (rt_segment_goal && rt_segment_goal == this->rt_active_goal_)
-      {
+      auto rt_segment_goal = segment_it->getGoalHandle();
+      if (rt_segment_goal && rt_segment_goal == this->rt_active_goal_) {
         // Check tolerances
-        if (time_data.uptime.toSec() < segment_it->endTime())
-        {
+        if (time_data.uptime.toSec() < segment_it->endTime()) {
           // Currently executing a segment: check path tolerances
-          const joint_trajectory_controller::SegmentTolerancesPerJoint<typename Base::Scalar>& joint_tolerances =
-              segment_it->getTolerances();
-          if (!checkStateTolerancePerJoint(this->state_joint_error_, joint_tolerances.state_tolerance))
-          {
-            if (this->verbose_)
-            {
-              ROS_ERROR_STREAM_NAMED(this->name_, "Path tolerances failed for joint: " << this->joint_names_[i]);
-              checkStateTolerancePerJoint(this->state_joint_error_, joint_tolerances.state_tolerance, true);
-            }
-            rt_segment_goal->preallocated_result_->error_code =
-                control_msgs::FollowJointTrajectoryResult::PATH_TOLERANCE_VIOLATED;
-            rt_segment_goal->setAborted(rt_segment_goal->preallocated_result_);
-            this->rt_active_goal_.reset();
-            this->successful_joint_traj_.reset();
-          }
-        }
-        else if (segment_it == --curr_traj[i].end())
-        {
-          if (this->verbose_)
-            ROS_DEBUG_STREAM_THROTTLE_NAMED(1, this->name_,
-                                            "Finished executing last segment, checking goal "
-                                            "tolerances");
-
-          // Controller uptime
-          const ros::Time uptime = this->time_data_.readFromRT()->uptime;
-
-          // Checks that we have ended inside the goal tolerances
-          const joint_trajectory_controller::SegmentTolerancesPerJoint<typename Base::Scalar>& tolerances =
-              segment_it->getTolerances();
-          const bool inside_goal_tolerances =
-              checkStateTolerancePerJoint(this->state_joint_error_, tolerances.goal_state_tolerance);
-
-          if (inside_goal_tolerances)
-          {
-            this->successful_joint_traj_[i] = 1;
-          }
-          else if (uptime.toSec() < segment_it->endTime() + tolerances.goal_time_tolerance)
-          {
-            // Still have some time left to meet the goal state tolerances
-          }
-          else
-          {
-            if (this->verbose_)
-            {
-              ROS_ERROR_STREAM_NAMED(this->name_, "Goal tolerances failed for joint: " << this->joint_names_[i]);
-              // Check the tolerances one more time to output the errors that occurs
-              checkStateTolerancePerJoint(this->state_joint_error_, tolerances.goal_state_tolerance, true);
-            }
-
-            rt_segment_goal->preallocated_result_->error_code =
-                control_msgs::FollowJointTrajectoryResult::GOAL_TOLERANCE_VIOLATED;
-            rt_segment_goal->setAborted(rt_segment_goal->preallocated_result_);
-            this->rt_active_goal_.reset();
-            this->successful_joint_traj_.reset();
-          }
+        } else if (segment_it == --curr_traj[i].end()) {
+          // Finished executing last segment
+          this->successful_joint_traj_[i] = 1;
         }
       }
     }
 
     // If there is an active goal and all segments finished successfully then set goal as succeeded
     typename Base::RealtimeGoalHandlePtr current_active_goal(this->rt_active_goal_);
-    if (current_active_goal && this->successful_joint_traj_.count() == this->joints_.size())
-    {
+    if (current_active_goal && this->successful_joint_traj_.count() == this->joints_.size()) {
       current_active_goal->preallocated_result_->error_code = control_msgs::FollowJointTrajectoryResult::SUCCESSFUL;
       current_active_goal->setSucceeded(current_active_goal->preallocated_result_);
       current_active_goal.reset();  // do not publish feedback
@@ -179,11 +157,12 @@ public:
     }
 
     // Hardware interface adapter: Generate and send commands
+    // Send just the position for this controller
     this->hw_iface_adapter_.updateCommand(time_data.uptime, time_data.period, this->desired_state_, this->state_error_);
+    ROS_INFO("IDX: %d at %f [ms]: Goal Pos: %s", current_idx, traj_time.toSec() * 1e3, ToString(this->desired_state_.position, 2, RAD_TO_DEG).c_str());
 
     // Set action feedback
-    if (current_active_goal)
-    {
+    if (current_active_goal) {
       current_active_goal->preallocated_feedback_->header.stamp = this->time_data_.readFromRT()->time;
       current_active_goal->preallocated_feedback_->header.frame_id = std::to_string(current_idx);
       current_active_goal->preallocated_feedback_->desired.positions = this->desired_state_.position;
@@ -196,7 +175,7 @@ public:
       current_active_goal->setFeedback(current_active_goal->preallocated_feedback_);
     }
 
-    // Publish state
+    // Publish state (feedback)
     this->publishState(time_data.uptime);
   }
 
