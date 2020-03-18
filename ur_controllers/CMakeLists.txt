@@ -133,7 +133,7 @@ include_directories(
 add_library(${PROJECT_NAME}
   src/scaled_joint_trajectory_controller.cpp
   src/speed_scaling_state_controller.cpp
-)
+        include/ur_controllers/ur_spline_segment.h)
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
