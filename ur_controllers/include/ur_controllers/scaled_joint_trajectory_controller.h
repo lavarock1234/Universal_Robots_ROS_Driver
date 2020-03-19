@@ -213,8 +213,8 @@ public:
     //ROS_INFO("SENDING COMMAND: %s, elapsed(%f), next(%f)", ToString(this->desired_state_.position, 2, RAD_TO_DEG).c_str(), elapsed, point.time_from_start - tfs0);
     this->hw_iface_adapter_.updateCommand(time_data.uptime, time_data.period, this->desired_state_, this->state_error_);
     //ROS_INFO("IDX: %d at %f [ms]: Goal Pos: %s, Tracked Pos:%s", current_idx, traj_time.toSec() * 1e3,
-      ToString(this->desired_state_.position, 2, RAD_TO_DEG).c_str(),
-      ToString(getEndTrajectoryPoint(curr_traj, current_idx).positions, 2, RAD_TO_DEG).c_str());
+    //  ToString(this->desired_state_.position, 2, RAD_TO_DEG).c_str(),
+    //  ToString(getEndTrajectoryPoint(curr_traj, current_idx).positions, 2, RAD_TO_DEG).c_str());
 
     // Set action feedback
     if (current_active_goal) {
