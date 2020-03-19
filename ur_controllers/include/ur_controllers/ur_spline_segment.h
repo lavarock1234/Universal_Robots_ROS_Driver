@@ -238,37 +238,27 @@ void UrSplineSegment<ScalarType>::init(const Time&  start_time,
   coefs_.resize(dim);
 
   typedef typename std::vector<SplineCoefficients>::iterator Iterator;
-  if (!has_velocity)
-  {
+  if (true) {
     // Linear interpolation
-    for(Iterator coefs_it = coefs_.begin(); coefs_it != coefs_.end(); ++coefs_it)
-    {
+    for(Iterator coefs_it = coefs_.begin(); coefs_it != coefs_.end(); ++coefs_it) {
       const typename std::vector<Scalar>::size_type id = std::distance(coefs_.begin(), coefs_it);
-
       computeCoefficients(start_state.position[id],
                           end_state.position[id],
                           duration_,
                           *coefs_it);
     }
-  }
-  else if (!has_acceleration)
-  {
+  } else if (!has_acceleration) {
     // Cubic interpolation
-    for(Iterator coefs_it = coefs_.begin(); coefs_it != coefs_.end(); ++coefs_it)
-    {
+    for(Iterator coefs_it = coefs_.begin(); coefs_it != coefs_.end(); ++coefs_it) {
       const typename std::vector<Scalar>::size_type id = std::distance(coefs_.begin(), coefs_it);
-
       computeCoefficients(start_state.position[id], start_state.velocity[id],
                           end_state.position[id],   end_state.velocity[id],
                           duration_,
                           *coefs_it);
     }
-  }
-  else
-  {
+  } else {
     // Quintic interpolation
-    for(Iterator coefs_it = coefs_.begin(); coefs_it != coefs_.end(); ++coefs_it)
-    {
+    for(Iterator coefs_it = coefs_.begin(); coefs_it != coefs_.end(); ++coefs_it) {
       const typename std::vector<Scalar>::size_type id = std::distance(coefs_.begin(), coefs_it);
 
       computeCoefficients(start_state.position[id], start_state.velocity[id], start_state.acceleration[id],
@@ -291,15 +281,18 @@ inline void UrSplineSegment<ScalarType>::generatePowers(int n, const Scalar& x, 
 
 template<class ScalarType>
 void UrSplineSegment<ScalarType>::
-computeCoefficients(const Scalar& start_pos,
-                    const Scalar& end_pos,
+computeCoefficients(const Scalar& p0_pos,
+                    const Scalar& p1_pos,
                     const Scalar& time,
                     SplineCoefficients& coefficients)
 {
-  coefficients[0] = start_pos;
-  coefficients[1] = (time == 0.0) ? 0.0 : (end_pos - start_pos) / time;
-  coefficients[2] = 0.0;
-  coefficients[3] = 0.0;
+  Scalar T[4];
+  generatePowers(3, time, T);
+
+  coefficients[0] = p0_pos;
+  coefficients[1] = 0.0;
+  coefficients[2] = (-3 * p0_pos + 3 * p1_pos) / T[2];
+  coefficients[3] = (2 * p0_pos - 2 * p1_pos) / T[3];
   coefficients[4] = 0.0;
   coefficients[5] = 0.0;
 }
