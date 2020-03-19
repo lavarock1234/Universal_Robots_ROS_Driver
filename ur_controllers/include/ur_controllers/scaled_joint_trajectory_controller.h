@@ -156,60 +156,23 @@ public:
     // we fetch the currently followed trajectory, it has been updated by the non-rt thread with something that starts
     // in the next control cycle, leaving the current cycle without a valid trajectory.
 
-    if (!this->rt_active_goal_) {
-      return;
-    }
-
-    // Update trajectory following info
-    static typename Base::RealtimeGoalHandlePtr prev_goal;
-    if (prev_goal != this->rt_active_goal_) {
-      // Trajectory sanity checks
-      if (getTrajectorySize(curr_traj) <= 1) {
-        ROS_ERROR_NAMED(this->name_, "Unexpected error: Trajectory must be have more than one point!");
-        return;
-      }
-      if (curr_traj.size() != this->joints_.size()) {
-        ROS_ERROR_NAMED(this->name_, "Unexpected error: Trajectory size (%d) does not match joint size (%d)!",
-                        (int) curr_traj.size(), (int) this->joints_.size());
-        return;
-      }
-      current_idx = 1; // skipping first point
-      point = getEndTrajectoryPoint(curr_traj, 1);
-      prev = getEndTrajectoryPoint(curr_traj, 0);
-      t0 = this->time_data_.readFromRT()->time;
-      tfs0 = 0;
-      prev_goal = this->rt_active_goal_;
-      ROS_INFO("Received new goal with t0 %f", t0.toSec());
-    }
-
-    // Update times
-    auto latest = this->time_data_.readFromRT()->time;
-    auto elapsed = (latest - t0).toSec();
-
-    // Check if segment or trajectory is done
-    while ((point.time_from_start - tfs0) <= elapsed) {
-      current_idx++;
-      if (current_idx >= getTrajectorySize(curr_traj)) {
-        ROS_INFO("TRAJECTORY DONE!");
-        this->rt_active_goal_->preallocated_result_->error_code = control_msgs::FollowJointTrajectoryResult::SUCCESSFUL;
-        this->rt_active_goal_->setSucceeded(this->rt_active_goal_->preallocated_result_);
-        this->rt_active_goal_.reset();
-        this->successful_joint_traj_.reset();
-        return;
-      }
-      prev = point;
-      point = getEndTrajectoryPoint(curr_traj, current_idx);
-    }
-
-    // Sample on segment
-    auto segment_s = elapsed - (prev.time_from_start - tfs0);
-    auto d_s = point.time_from_start - prev.time_from_start;
+    // Update current state and state error
+    int current_idx = -1;
     for (unsigned int i = 0; i < this->joints_.size(); ++i) {
-      this->desired_joint_state_.position[0] =
-        interpolate(segment_s, d_s, prev.positions[i], point.positions[i], prev.velocities[i], point.velocities[i]);
-      this->desired_joint_state_.velocity[0] = 0;
-      this->desired_joint_state_.acceleration[0] = 0;
+      this->current_state_.position[i] = this->joints_[i].getPosition();
+      this->current_state_.velocity[i] = this->joints_[i].getVelocity();
+      // There's no acceleration data available in a joint handle
 
+      // Sample populates both the iterator to current tracked point and desired_joint_state for this joint
+      auto segment_it = sample(curr_traj[i], traj_time.toSec(), this->desired_joint_state_);
+      if(current_idx < 0) {
+          current_idx = std::distance(curr_traj[i].cbegin(), segment_it);
+      }
+      if (curr_traj[i].end() == segment_it) {
+        // Non-realtime safe, but should never happen under normal operation
+        ROS_ERROR_NAMED(this->name_, "Unexpected error: No trajectory defined at current time. Please contact the package maintainer.");
+        return;
+      }
       this->desired_state_.position[i] = this->desired_joint_state_.position[0];
       this->desired_state_.velocity[i] = this->desired_joint_state_.velocity[0];
       this->desired_state_.acceleration[i] = this->desired_joint_state_.acceleration[0];
@@ -221,28 +184,50 @@ public:
       this->state_error_.position[i] = angles::shortest_angular_distance(this->current_state_.position[i], this->desired_joint_state_.position[0]);
       this->state_error_.velocity[i] = this->desired_joint_state_.velocity[0] - this->current_state_.velocity[i];
       this->state_error_.acceleration[i] = 0.0;
+
+      // Check tolerances
+      auto rt_segment_goal = segment_it->getGoalHandle();
+      if (rt_segment_goal && rt_segment_goal == this->rt_active_goal_) {
+        // Check tolerances
+        if (time_data.uptime.toSec() < segment_it->endTime()) {
+          // Currently executing a segment: check path tolerances
+        } else if (segment_it == --curr_traj[i].end()) {
+          // Finished executing last segment
+          this->successful_joint_traj_[i] = 1;
+        }
+      }
+    }
+
+    // If there is an active goal and all segments finished successfully then set goal as succeeded
+    typename Base::RealtimeGoalHandlePtr current_active_goal(this->rt_active_goal_);
+    if (current_active_goal && this->successful_joint_traj_.count() == this->joints_.size()) {
+      current_active_goal->preallocated_result_->error_code = control_msgs::FollowJointTrajectoryResult::SUCCESSFUL;
+      current_active_goal->setSucceeded(current_active_goal->preallocated_result_);
+      current_active_goal.reset();  // do not publish feedback
+      this->rt_active_goal_.reset();
+      this->successful_joint_traj_.reset();
     }
 
     // Hardware interface adapter: Generate and send commands
     // Send just the position for this controller
-    ROS_INFO("SENDING COMMAND: %s, elapsed(%f), next(%f)", ToString(this->desired_state_.position, 2, RAD_TO_DEG).c_str(), elapsed, point.time_from_start - tfs0);
+    //ROS_INFO("SENDING COMMAND: %s, elapsed(%f), next(%f)", ToString(this->desired_state_.position, 2, RAD_TO_DEG).c_str(), elapsed, point.time_from_start - tfs0);
     this->hw_iface_adapter_.updateCommand(time_data.uptime, time_data.period, this->desired_state_, this->state_error_);
-//    ROS_INFO("\n%s", printTrajectory(curr_traj).c_str());
-//    ROS_INFO("IDX: %d (%s) at %f [ms]: Error Pos: %s", current_idx, ToString(current_tracked_point, 2, RAD_TO_DEG).c_str(),
-//      traj_time.toSec() * 1e3, ToString(this->state_error_.position, 2, RAD_TO_DEG).c_str());
+    //ROS_INFO("IDX: %d at %f [ms]: Goal Pos: %s, Tracked Pos:%s", current_idx, traj_time.toSec() * 1e3,
+      ToString(this->desired_state_.position, 2, RAD_TO_DEG).c_str(),
+      ToString(getEndTrajectoryPoint(curr_traj, current_idx).positions, 2, RAD_TO_DEG).c_str());
 
     // Set action feedback
-    if (this->rt_active_goal_) {
-      this->rt_active_goal_->preallocated_feedback_->header.stamp = this->time_data_.readFromRT()->time;
-      this->rt_active_goal_->preallocated_feedback_->header.frame_id = std::to_string(current_idx);
-      this->rt_active_goal_->preallocated_feedback_->desired.positions = this->desired_state_.position;
-      this->rt_active_goal_->preallocated_feedback_->desired.velocities = this->desired_state_.velocity;
-      this->rt_active_goal_->preallocated_feedback_->desired.accelerations = this->desired_state_.acceleration;
-      this->rt_active_goal_->preallocated_feedback_->actual.positions = this->current_state_.position;
-      this->rt_active_goal_->preallocated_feedback_->actual.velocities = this->current_state_.velocity;
-      this->rt_active_goal_->preallocated_feedback_->error.positions = this->state_error_.position;
-      this->rt_active_goal_->preallocated_feedback_->error.velocities = this->state_error_.velocity;
-      this->rt_active_goal_->setFeedback(this->rt_active_goal_->preallocated_feedback_);
+    if (current_active_goal) {
+      current_active_goal->preallocated_feedback_->header.stamp = this->time_data_.readFromRT()->time;
+      current_active_goal->preallocated_feedback_->header.frame_id = std::to_string(current_idx);
+      current_active_goal->preallocated_feedback_->desired.positions = this->desired_state_.position;
+      current_active_goal->preallocated_feedback_->desired.velocities = this->desired_state_.velocity;
+      current_active_goal->preallocated_feedback_->desired.accelerations = this->desired_state_.acceleration;
+      current_active_goal->preallocated_feedback_->actual.positions = this->current_state_.position;
+      current_active_goal->preallocated_feedback_->actual.velocities = this->current_state_.velocity;
+      current_active_goal->preallocated_feedback_->error.positions = this->state_error_.position;
+      current_active_goal->preallocated_feedback_->error.velocities = this->state_error_.velocity;
+      current_active_goal->setFeedback(current_active_goal->preallocated_feedback_);
     }
 
     // Publish state (feedback)
